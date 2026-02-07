@@ -159,6 +159,14 @@ def build_css(options: ThemeOptions) -> str:
         letter-spacing: 0.2px;
       }}
 
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      [role='combobox']:focus-visible {{
+        outline: 3px solid var(--accent-alt) !important;
+        outline-offset: 2px !important;
+      }}
+
       .stDownloadButton > button {{
         border-radius: 11px;
         border: 1px solid var(--accent-alt);

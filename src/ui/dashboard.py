@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Dict
 
@@ -35,6 +36,7 @@ from src.ui.presets import PRESETS, list_preset_names
 from src.ui.profiles import add_profile, apply_profile_to_state, find_profile, get_profile_names, snapshot_config_from_control
 from src.ui.state import dataframe_to_csv_bytes, get_run_history, get_run_result, init_session_state, save_run_result
 from src.ui.theme import ThemeOptions, build_css
+from src.ui.video_advisor import inspect_uploaded_video, recommend_pipeline_params
 from src.visualization.drawer import PipelineVisualizer
 
 
@@ -160,6 +162,57 @@ def _render_profile_manager(control: FrontendControl) -> None:
                     st.rerun()
 
 
+def _get_video_advice(uploaded) -> dict | None:
+    if uploaded is None:
+        return None
+
+    raw = uploaded.getvalue()
+    if not raw:
+        return None
+
+    fingerprint = hashlib.sha1(raw).hexdigest()
+    cache = dict(st.session_state.get("video_advisor_cache", {}))
+    if fingerprint in cache:
+        return cache[fingerprint]
+
+    metadata = inspect_uploaded_video(uploaded)
+    if metadata is None:
+        return None
+
+    advice = recommend_pipeline_params(metadata)
+    cache[fingerprint] = advice
+    st.session_state["video_advisor_cache"] = cache
+    return advice
+
+
+def _render_video_advisor(uploaded) -> None:
+    with st.expander("Assistente de configuracao", expanded=False):
+        advice = _get_video_advice(uploaded)
+        if advice is None:
+            st.caption("Envie um video valido para gerar recomendacoes automaticas.")
+            return
+
+        meta = advice["metadata"]
+        st.caption(
+            f"Video detectado: {meta['width']}x{meta['height']} | {meta['fps']} fps | "
+            f"{meta['frame_count']} frames | {meta['duration_seconds']}s"
+        )
+        st.info(advice["reason"])
+
+        st.markdown(
+            f"Recomendado: `max_frames={advice['max_frames']}`, `fps={advice['fps']}`, "
+            f"`ocr_interval={advice['ocr_interval']}`, `cluster_interval={advice['cluster_interval']}`."
+        )
+
+        if st.button("Aplicar recomendacao automatica", use_container_width=True):
+            st.session_state["max_frames"] = int(advice["max_frames"])
+            st.session_state["fps"] = int(advice["fps"])
+            st.session_state["ocr_interval"] = int(advice["ocr_interval"])
+            st.session_state["cluster_interval"] = int(advice["cluster_interval"])
+            st.success("Configuracao recomendada aplicada.")
+            st.rerun()
+
+
 def _render_sidebar_controls() -> FrontendControl:
     with st.sidebar:
         st.header("Control Center")
@@ -222,6 +275,8 @@ def _render_sidebar_controls() -> FrontendControl:
 
         estimated_seconds = estimated_runtime_seconds(max_frames, expected_fps=max(1.0, fps * 0.42))
         st.caption(f"Tempo estimado de processamento: ~{estimated_seconds:.1f}s")
+
+        _render_video_advisor(uploaded)
 
         run_clicked = st.button("Processar video", use_container_width=True, type="primary")
 

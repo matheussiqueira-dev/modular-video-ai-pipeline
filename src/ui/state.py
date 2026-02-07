@@ -27,6 +27,7 @@ def init_session_state() -> None:
         "config_profiles": [],
         "profile_name_input": "",
         "selected_profile_name": "",
+        "video_advisor_cache": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
