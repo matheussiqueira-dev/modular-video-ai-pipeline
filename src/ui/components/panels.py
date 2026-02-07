@@ -80,6 +80,80 @@ def render_run_history(history: List[Dict]) -> None:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+def render_comparison_summary(comparison: Dict) -> None:
+    if not comparison.get("current"):
+        return
+
+    current = comparison["current"]
+    if not comparison.get("has_previous"):
+        render_metric_cards(
+            [
+                ("Frames (Atual)", str(current.get("frames_processed", 0))),
+                ("Eventos (Atual)", str(current.get("events_detected", 0))),
+                ("FPS (Atual)", f"{float(current.get('average_processing_fps', 0.0)):.2f}"),
+            ]
+        )
+        st.caption("Sem execucao anterior para comparacao.")
+        return
+
+    delta = comparison.get("delta", {})
+
+    def _fmt_delta(value: float, digits: int = 0) -> str:
+        sign = "+" if value > 0 else ""
+        if digits == 0:
+            return f"{sign}{int(value)}"
+        return f"{sign}{value:.{digits}f}"
+
+    render_metric_cards(
+        [
+            (
+                "Frames",
+                f"{current.get('frames_processed', 0)} ({_fmt_delta(float(delta.get('frames_processed', 0)))})",
+            ),
+            (
+                "Eventos",
+                f"{current.get('events_detected', 0)} ({_fmt_delta(float(delta.get('events_detected', 0)))})",
+            ),
+            (
+                "FPS Medio",
+                f"{float(current.get('average_processing_fps', 0.0)):.2f} ({_fmt_delta(float(delta.get('average_processing_fps', 0.0)), digits=2)})",
+            ),
+        ]
+    )
+
+
+def build_severity_distribution_chart(events_df: pd.DataFrame):
+    if events_df.empty:
+        return None
+
+    try:
+        import plotly.express as px
+    except ModuleNotFoundError:
+        return None
+
+    counts = events_df["severity"].fillna("info").value_counts().reset_index()
+    counts.columns = ["severity", "count"]
+
+    fig = px.pie(
+        counts,
+        names="severity",
+        values="count",
+        title="Distribuicao por Severidade",
+        color="severity",
+        color_discrete_map={"info": "#4dc7ff", "warning": "#ffb347", "critical": "#f26f6f"},
+        hole=0.52,
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        height=340,
+        margin=dict(l=24, r=24, t=42, b=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(16, 40, 60, 0.32)",
+        legend_title_text="Severidade",
+    )
+    return fig
+
+
 def build_event_timeline_chart(events_df: pd.DataFrame):
     if events_df.empty:
         return None

@@ -2,51 +2,46 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import pandas as pd
 
 
-def load_analytics_jsonl(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def _frames_events_from_lines(lines: Iterable[str]) -> Tuple[pd.DataFrame, pd.DataFrame]:
     frame_rows: List[dict] = []
     event_rows: List[dict] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
 
-    if not path.exists():
-        return pd.DataFrame(), pd.DataFrame()
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
 
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            row_type = row.get("record_type", row.get("type"))
-            if row_type == "frame":
-                stats = row.get("stats", {})
-                frame_rows.append(
-                    {
-                        "frame": int(row.get("frame", 0)),
-                        "processing_fps": float(stats.get("processing_fps", 0.0)),
-                        "active_tracks": int(stats.get("active_tracks", 0)),
-                        "events_in_frame": int(stats.get("events_in_frame", 0)),
-                    }
-                )
-            elif row_type == "event":
-                event_type = str(row.get("type", "EVENT"))
-                event_rows.append(
-                    {
-                        "frame": int(row.get("frame", 0)),
-                        "type": event_type,
-                        "object_id": int(row.get("object_id", -1)),
-                        "severity": str(row.get("severity", "info")),
-                        "details": str(row.get("details", "")),
-                    }
-                )
+        row_type = row.get("record_type", row.get("type"))
+        if row_type == "frame":
+            stats = row.get("stats", {})
+            frame_rows.append(
+                {
+                    "frame": int(row.get("frame", 0)),
+                    "processing_fps": float(stats.get("processing_fps", 0.0)),
+                    "active_tracks": int(stats.get("active_tracks", 0)),
+                    "events_in_frame": int(stats.get("events_in_frame", 0)),
+                }
+            )
+        elif row_type == "event":
+            event_type = str(row.get("type", "EVENT"))
+            event_rows.append(
+                {
+                    "frame": int(row.get("frame", 0)),
+                    "type": event_type,
+                    "object_id": int(row.get("object_id", -1)),
+                    "severity": str(row.get("severity", "info")),
+                    "details": str(row.get("details", "")),
+                }
+            )
 
     frames_df = pd.DataFrame(frame_rows)
     events_df = pd.DataFrame(event_rows)
@@ -58,6 +53,21 @@ def load_analytics_jsonl(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
         events_df = events_df.sort_values("frame").reset_index(drop=True)
 
     return frames_df, events_df
+
+
+def load_analytics_jsonl(path: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    if not path.exists():
+        return pd.DataFrame(), pd.DataFrame()
+
+    with path.open("r", encoding="utf-8") as handle:
+        return _frames_events_from_lines(handle)
+
+
+def load_analytics_jsonl_bytes(content: bytes) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    if not content:
+        return pd.DataFrame(), pd.DataFrame()
+    text = content.decode("utf-8", errors="ignore")
+    return _frames_events_from_lines(text.splitlines())
 
 
 def summarize_frames(frames_df: pd.DataFrame) -> Dict[str, float]:

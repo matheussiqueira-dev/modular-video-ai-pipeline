@@ -68,6 +68,7 @@ Thumbs.db
 *.mkv
 output/
 results/
+runtime/
 demo_result.mp4
 resultado_teste.mp4
 
@@ -82,3 +83,4 @@ resultado_teste.mp4
 
 # Pipeline telemetry exports
 *.jsonl
+*.sqlite3

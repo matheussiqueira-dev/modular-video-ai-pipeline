@@ -7,6 +7,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.ui.analytics import filter_events, load_analytics_jsonl, summarize_events, summarize_frames
+from src.ui.analytics import load_analytics_jsonl_bytes
 
 
 def _write_jsonl(path, rows):
@@ -84,3 +85,15 @@ def test_filter_events_applies_combined_filters():
 
     assert len(filtered) == 1
     assert filtered.iloc[0]["object_id"] == 2
+
+
+def test_load_analytics_jsonl_bytes_supports_in_memory_content():
+    content = (
+        b'{"record_type":"frame","type":"frame","frame":0,"stats":{"processing_fps":10.0,"active_tracks":2,"events_in_frame":0}}\n'
+        b'{"record_type":"event","type":"ZONE_ENTRY","frame":1,"object_id":9,"severity":"info","details":"entered"}\n'
+    )
+
+    frames_df, events_df = load_analytics_jsonl_bytes(content)
+    assert len(frames_df) == 1
+    assert len(events_df) == 1
+    assert events_df.iloc[0]["type"] == "ZONE_ENTRY"

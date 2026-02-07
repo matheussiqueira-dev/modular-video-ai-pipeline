@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
-import tempfile
-from pathlib import Path
+import time
 from typing import Dict
 
 import numpy as np
+import requests
 import streamlit as st
 
 from src.clustering.identifier import VisualIdentifier
@@ -17,17 +16,23 @@ from src.events.analyzer import EventAnalyzer
 from src.homography.transformer import PerspectiveTransformer
 from src.ocr.reader import SceneTextReader
 from src.segmentation.segmenter import VideoSegmenter
-from src.ui.analytics import filter_events, load_analytics_jsonl, summarize_events, summarize_frames
+from src.ui.analytics import filter_events, load_analytics_jsonl_bytes, summarize_events, summarize_frames
+from src.ui.api_client import ApiClientConfig, BackendApiClient
 from src.ui.components import (
     build_event_timeline_chart,
     build_frame_performance_chart,
+    build_severity_distribution_chart,
+    render_comparison_summary,
     render_hero,
     render_metric_cards,
     render_run_history,
     render_zone_preview,
 )
+from src.ui.contracts import FrontendControl, RunPayload
+from src.ui.insights import compare_summaries
 from src.ui.parsers import estimated_runtime_seconds, parse_zones_text
 from src.ui.presets import PRESETS, list_preset_names
+from src.ui.profiles import add_profile, apply_profile_to_state, find_profile, get_profile_names, snapshot_config_from_control
 from src.ui.state import dataframe_to_csv_bytes, get_run_history, get_run_result, init_session_state, save_run_result
 from src.ui.theme import ThemeOptions, build_css
 from src.visualization.drawer import PipelineVisualizer
@@ -81,10 +86,84 @@ def _build_pipeline(config: PipelineConfig, zones: list[dict], mock_mode: bool) 
     )
 
 
-def _render_sidebar_controls() -> Dict:
+def _build_control(
+    preset_name: str,
+    uploaded,
+    execution_target: str,
+    max_frames: int,
+    fps: int,
+    ocr_interval: int,
+    cluster_interval: int,
+    high_contrast: bool,
+    reduced_motion: bool,
+    mock_mode: bool,
+    zones: list[dict],
+    run_clicked: bool,
+) -> FrontendControl:
+    return FrontendControl(
+        preset_name=preset_name,
+        uploaded=uploaded,
+        execution_target=execution_target,
+        max_frames=max_frames,
+        fps=fps,
+        ocr_interval=ocr_interval,
+        cluster_interval=cluster_interval,
+        high_contrast=high_contrast,
+        reduced_motion=reduced_motion,
+        mock_mode=mock_mode,
+        zones=zones,
+        backend_base_url=st.session_state.get("backend_base_url", "http://localhost:8000"),
+        backend_api_key=st.session_state.get("backend_api_key", ""),
+        backend_poll=float(st.session_state.get("backend_poll", 1.2)),
+        run_clicked=run_clicked,
+    )
+
+
+def _render_profile_manager(control: FrontendControl) -> None:
+    st.subheader("Perfis")
+    st.caption("Salve configuracoes para repetir cenarios sem retrabalho.")
+
+    profile_name = st.text_input("Nome do perfil", key="profile_name_input", placeholder="Ex: loja-noturno")
+    profile_names = get_profile_names(st.session_state.get("config_profiles", []))
+    selected_profile = st.selectbox(
+        "Perfil salvo",
+        options=[""] + profile_names,
+        key="selected_profile_name",
+        help="Selecione e carregue um perfil para preencher os controles atuais.",
+    )
+
+    col_save, col_load = st.columns(2)
+    with col_save:
+        if st.button("Salvar perfil", use_container_width=True):
+            updated, ok, message = add_profile(
+                profiles=list(st.session_state.get("config_profiles", [])),
+                name=profile_name,
+                config_snapshot=snapshot_config_from_control(control),
+            )
+            st.session_state["config_profiles"] = updated
+            if ok:
+                st.success(message)
+            else:
+                st.warning(message)
+
+    with col_load:
+        if st.button("Carregar perfil", use_container_width=True):
+            if not selected_profile:
+                st.warning("Selecione um perfil para carregar.")
+            else:
+                found = find_profile(st.session_state.get("config_profiles", []), selected_profile)
+                if found is None:
+                    st.error("Perfil nao encontrado.")
+                else:
+                    apply_profile_to_state(found.get("config", {}), st.session_state)
+                    st.success(f"Perfil '{selected_profile}' carregado")
+                    st.rerun()
+
+
+def _render_sidebar_controls() -> FrontendControl:
     with st.sidebar:
         st.header("Control Center")
-        st.caption("Configure o processamento com foco em qualidade, velocidade e analise operacional.")
+        st.caption("Configure processamento com foco em qualidade, performance e operabilidade.")
 
         preset_name = st.selectbox(
             "Preset de fluxo",
@@ -99,8 +178,21 @@ def _render_sidebar_controls() -> Dict:
         uploaded = st.file_uploader(
             "Video de entrada",
             type=["mp4", "mov", "avi", "mkv"],
-            help="Use videos curtos para iterar mais rapido no ajuste de parametros.",
+            help="Use videos curtos para iterar rapidamente no ajuste de parametros.",
         )
+
+        st.subheader("Engine")
+        execution_target = st.radio(
+            "Destino de execucao",
+            options=["Local Engine", "Backend API"],
+            key="execution_target",
+            help="Local: processa no app. API: envia job para backend protegido por API key.",
+        )
+
+        if execution_target == "Backend API":
+            st.text_input("Base URL da API", key="backend_base_url", placeholder="http://localhost:8000")
+            st.text_input("API Key", key="backend_api_key", type="password")
+            st.slider("Intervalo de polling (s)", min_value=1.0, max_value=5.0, value=1.2, step=0.2, key="backend_poll")
 
         st.subheader("Parametros")
         max_frames = st.slider("Maximo de frames", min_value=30, max_value=1500, step=30, key="max_frames")
@@ -112,8 +204,8 @@ def _render_sidebar_controls() -> Dict:
         high_contrast = st.toggle("Alto contraste", key="high_contrast")
         reduced_motion = st.toggle("Reducao de movimento", key="reduced_motion")
 
-        st.subheader("Modo de execucao")
-        mock_mode = st.toggle("Mock mode", key="mock_mode", help="Desative para integrar modelos reais no futuro.")
+        st.subheader("Inferencia")
+        mock_mode = st.toggle("Mock mode", key="mock_mode", help="Desative para integrar modelos reais.")
 
         zones_text = st.text_area(
             "Zonas monitoradas",
@@ -133,29 +225,76 @@ def _render_sidebar_controls() -> Dict:
 
         run_clicked = st.button("Processar video", use_container_width=True, type="primary")
 
-    return {
-        "preset_name": preset_name,
-        "uploaded": uploaded,
-        "max_frames": max_frames,
-        "fps": fps,
-        "ocr_interval": ocr_interval,
-        "cluster_interval": cluster_interval,
-        "high_contrast": high_contrast,
-        "reduced_motion": reduced_motion,
-        "mock_mode": mock_mode,
-        "zones": zones,
-        "run_clicked": run_clicked,
-    }
+        control = _build_control(
+            preset_name=preset_name,
+            uploaded=uploaded,
+            execution_target=execution_target,
+            max_frames=max_frames,
+            fps=fps,
+            ocr_interval=ocr_interval,
+            cluster_interval=cluster_interval,
+            high_contrast=high_contrast,
+            reduced_motion=reduced_motion,
+            mock_mode=mock_mode,
+            zones=zones,
+            run_clicked=run_clicked,
+        )
+
+        st.markdown("---")
+        _render_profile_manager(control)
+
+    return control
 
 
-def _run_pipeline_from_ui(control: Dict, studio_slot) -> None:
-    uploaded = control["uploaded"]
+def _save_result_payload(control: FrontendControl, summary: dict, video_bytes: bytes, analytics_bytes: bytes, job_id: str | None = None) -> None:
+    frames_df, events_df = load_analytics_jsonl_bytes(analytics_bytes)
+
+    payload = RunPayload(
+        preset=control.preset_name,
+        summary=summary,
+        video_bytes=video_bytes,
+        analytics_bytes=analytics_bytes,
+        frames_df=frames_df,
+        events_df=events_df,
+        zones=control.zones,
+        execution_target=control.execution_target,
+        config={
+            "max_frames": control.max_frames,
+            "fps": control.fps,
+            "ocr_interval": control.ocr_interval,
+            "cluster_interval": control.cluster_interval,
+            "mock_mode": control.mock_mode,
+        },
+        job_id=job_id,
+    )
+
+    save_run_result(
+        {
+            "preset": payload.preset,
+            "summary": payload.summary,
+            "video_bytes": payload.video_bytes,
+            "analytics_bytes": payload.analytics_bytes,
+            "frames_df": payload.frames_df,
+            "events_df": payload.events_df,
+            "zones": payload.zones,
+            "job_id": payload.job_id,
+            "execution_target": payload.execution_target,
+            "config": payload.config,
+        }
+    )
+
+
+def _run_pipeline_local(control: FrontendControl, studio_slot) -> None:
+    uploaded = control.uploaded
     if uploaded is None:
         studio_slot.warning("Envie um video para iniciar o processamento.")
         return
 
     progress = studio_slot.progress(0)
     status = studio_slot.empty()
+
+    import tempfile
+    from pathlib import Path
 
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_dir = Path(tmpdir)
@@ -168,19 +307,19 @@ def _run_pipeline_from_ui(control: Dict, studio_slot) -> None:
         config = PipelineConfig(
             output_path=output_path,
             export_jsonl_path=export_path,
-            max_frames=control["max_frames"],
-            fps=control["fps"],
-            ocr_interval=control["ocr_interval"],
-            clustering_interval=control["cluster_interval"],
+            max_frames=control.max_frames,
+            fps=control.fps,
+            ocr_interval=control.ocr_interval,
+            clustering_interval=control.cluster_interval,
         )
 
-        pipeline = _build_pipeline(config=config, zones=control["zones"], mock_mode=control["mock_mode"])
+        pipeline = _build_pipeline(config=config, zones=control.zones, mock_mode=control.mock_mode)
 
         def _on_progress(done_frames: int, total_frames: int, stats: Dict[str, float]) -> None:
             pct = int(min(100, (done_frames / max(1, total_frames)) * 100))
             progress.progress(pct)
             status.info(
-                f"Processando... frame {done_frames}/{total_frames} | FPS {stats.get('processing_fps', 0.0):.2f}"
+                f"Processando localmente... frame {done_frames}/{total_frames} | FPS {stats.get('processing_fps', 0.0):.2f}"
             )
 
         with JsonlExporter(export_path) as exporter:
@@ -192,34 +331,111 @@ def _run_pipeline_from_ui(control: Dict, studio_slot) -> None:
                 progress_callback=_on_progress,
             )
 
-        frames_df, events_df = load_analytics_jsonl(export_path)
         video_bytes = output_path.read_bytes() if output_path.exists() else b""
         analytics_bytes = export_path.read_bytes() if export_path.exists() else b""
-
-        save_run_result(
-            {
-                "preset": control["preset_name"],
-                "summary": summary,
-                "video_bytes": video_bytes,
-                "analytics_bytes": analytics_bytes,
-                "frames_df": frames_df,
-                "events_df": events_df,
-                "zones": control["zones"],
-                "config": {
-                    "max_frames": config.max_frames,
-                    "fps": config.fps,
-                    "ocr_interval": config.ocr_interval,
-                    "cluster_interval": config.clustering_interval,
-                    "mock_mode": control["mock_mode"],
-                },
-            }
-        )
+        _save_result_payload(control, summary, video_bytes, analytics_bytes, job_id=None)
 
     progress.progress(100)
-    status.success("Processamento concluido com sucesso.")
+    status.success("Processamento local concluido.")
 
 
-def _render_studio_tab(control: Dict, run_result: Dict | None) -> None:
+def _run_pipeline_backend(control: FrontendControl, studio_slot) -> None:
+    uploaded = control.uploaded
+    if uploaded is None:
+        studio_slot.warning("Envie um video para iniciar o processamento.")
+        return
+
+    if not control.backend_base_url:
+        studio_slot.error("Informe a Base URL da API para executar no backend.")
+        return
+
+    if not control.backend_api_key:
+        studio_slot.error("Informe a API Key para autenticar no backend.")
+        return
+
+    progress = studio_slot.progress(0)
+    status = studio_slot.empty()
+
+    client = BackendApiClient(
+        ApiClientConfig(
+            base_url=control.backend_base_url,
+            api_key=control.backend_api_key,
+            timeout_seconds=300,
+        )
+    )
+
+    payload = {
+        "max_frames": control.max_frames,
+        "fps": control.fps,
+        "ocr_interval": control.ocr_interval,
+        "clustering_interval": control.cluster_interval,
+        "mock_mode": control.mock_mode,
+    }
+
+    try:
+        status.info("Criando job no backend...")
+        created = client.create_job(
+            file_name=uploaded.name,
+            file_bytes=uploaded.getvalue(),
+            payload=payload,
+            zones=control.zones,
+            async_mode=True,
+        )
+        job_id = created["job_id"]
+
+        while True:
+            job = client.get_job(job_id)
+            pct = int(float(job.get("progress", 0.0)))
+            progress.progress(max(0, min(100, pct)))
+            status.info(
+                f"Backend job {job_id} | status={job.get('status')} | {int(job.get('processed_frames', 0))}/{int(job.get('max_frames', 0))} frames"
+            )
+
+            state = job.get("status")
+            if state == "completed":
+                video_bytes = client.download_video(job_id)
+                analytics_bytes = client.download_analytics(job_id)
+                summary = job.get("summary", {})
+                _save_result_payload(control, summary, video_bytes, analytics_bytes, job_id=job_id)
+                progress.progress(100)
+                status.success(f"Processamento remoto concluido. Job ID: {job_id}")
+                break
+
+            if state == "failed":
+                message = job.get("error_message") or "Falha no processamento remoto"
+                status.error(f"Job {job_id} falhou: {message}")
+                break
+
+            time.sleep(max(0.5, control.backend_poll))
+
+    except requests.HTTPError as exc:
+        detail = "Erro HTTP ao executar backend"
+        if exc.response is not None:
+            try:
+                payload = exc.response.json()
+                detail = payload.get("detail", detail)
+            except Exception:
+                detail = exc.response.text or detail
+        status.error(detail)
+    except Exception as exc:
+        status.error(f"Falha na integracao backend: {exc}")
+
+
+def _run_pipeline_from_ui(control: FrontendControl, studio_slot) -> None:
+    if control.execution_target == "Backend API":
+        _run_pipeline_backend(control, studio_slot)
+    else:
+        _run_pipeline_local(control, studio_slot)
+
+
+def _get_previous_summary() -> dict | None:
+    history = get_run_history()
+    if len(history) < 2:
+        return None
+    return history[1].get("summary")
+
+
+def _render_studio_tab(control: FrontendControl, run_result: Dict | None) -> None:
     render_hero(
         title="Frontend Vision Studio",
         subtitle="Orquestracao visual para upload, configuracao, processamento e inspecao operacional de eventos.",
@@ -227,20 +443,23 @@ def _render_studio_tab(control: Dict, run_result: Dict | None) -> None:
     )
 
     st.subheader("Configuracao de zonas")
-    render_zone_preview(control["zones"])
+    render_zone_preview(control.zones)
 
     if run_result is None:
         st.info("Execute o pipeline para visualizar metricas, video processado e analytics detalhado.")
         return
 
     summary = run_result.get("summary", {})
-    metrics = [
-        ("Frames Processados", str(int(summary.get("frames_processed", 0)))),
-        ("Eventos Detectados", str(int(summary.get("events_detected", 0)))),
-        ("FPS Medio", f"{float(summary.get('average_processing_fps', 0.0)):.2f}"),
-        ("Preset", str(run_result.get("preset", "Custom"))),
-    ]
-    render_metric_cards(metrics)
+    previous = _get_previous_summary()
+    comparison = compare_summaries(summary, previous)
+
+    st.markdown("### Resultado da Execucao")
+    render_comparison_summary(comparison)
+
+    metadata_cols = st.columns(3)
+    metadata_cols[0].caption(f"Preset: {run_result.get('preset', 'Custom')}")
+    metadata_cols[1].caption(f"Execucao: {run_result.get('execution_target', 'Local Engine')}")
+    metadata_cols[2].caption(f"Job ID: {run_result.get('job_id', 'N/A')}")
 
     st.subheader("Video anotado")
     video_bytes = run_result.get("video_bytes", b"")
@@ -312,7 +531,7 @@ def _render_analytics_tab(run_result: Dict | None) -> None:
 
     filtered_events = filter_events(events_df, selected_types, selected_severities, object_id_query, text_query)
 
-    chart_col1, chart_col2 = st.columns(2)
+    chart_col1, chart_col2, chart_col3 = st.columns(3)
     with chart_col1:
         perf_fig = build_frame_performance_chart(frames_df)
         if perf_fig is not None:
@@ -328,6 +547,12 @@ def _render_analytics_tab(run_result: Dict | None) -> None:
                 st.info("Sem eventos para os filtros atuais.")
             else:
                 st.info("Timeline indisponivel. Instale plotly para habilitar visualizacao.")
+    with chart_col3:
+        severity_fig = build_severity_distribution_chart(filtered_events)
+        if severity_fig is not None:
+            st.plotly_chart(severity_fig, use_container_width=True)
+        else:
+            st.info("Distribuicao de severidade indisponivel para os filtros atuais.")
 
     st.markdown("### Eventos filtrados")
     st.dataframe(filtered_events, use_container_width=True, hide_index=True)
@@ -346,21 +571,21 @@ def _render_history_tab() -> None:
     render_run_history(get_run_history())
 
 
-def _render_architecture_notes(control: Dict) -> None:
+def _render_architecture_notes(control: FrontendControl) -> None:
     st.markdown(
         f"""
         <div class='panel-shell ui-fade-in'>
           <h3 style='margin-top:0;'>Frontend Review Snapshot</h3>
           <p class='muted'>
-            Arquitetura modularizada em componentes de UI, estado e analytics. Fluxo principal cobre upload, parametrizacao,
-            execucao assitida com progresso, leitura analitica e exportacao.
+            Arquitetura modular com execucao local/remota, contratos tipados no dashboard, perfis de configuracao,
+            comparativo de runs e analytics com filtros multicriterio.
           </p>
           <ul>
-            <li><span class='muted'>Responsividade:</span> layout com colunas adaptativas e blocos mobile-friendly.</li>
-            <li><span class='muted'>Acessibilidade:</span> modo alto contraste e opcao de reducao de movimento.</li>
-            <li><span class='muted'>Performance:</span> OCR/Clustering intervalados, filtros client-side e exportacao direta.</li>
-            <li><span class='muted'>SEO:</span> para Streamlit, SEO publico e limitado por arquitetura server-rendered.</li>
-            <li><span class='muted'>Preset ativo:</span> {control['preset_name']}.</li>
+            <li><span class='muted'>Design System:</span> tokens centralizados, componentes reutilizaveis e layout responsivo.</li>
+            <li><span class='muted'>Acessibilidade:</span> alto contraste e reducao de movimento configuraveis.</li>
+            <li><span class='muted'>Performance:</span> parsing em memoria e fluxo incremental por job.</li>
+            <li><span class='muted'>Escalabilidade:</span> compativel com backend API versionado.</li>
+            <li><span class='muted'>Target atual:</span> {control.execution_target}.</li>
           </ul>
         </div>
         """,
@@ -375,8 +600,8 @@ def run_dashboard() -> None:
     st.markdown(
         build_css(
             ThemeOptions(
-                high_contrast=control["high_contrast"],
-                reduced_motion=control["reduced_motion"],
+                high_contrast=control.high_contrast,
+                reduced_motion=control.reduced_motion,
             )
         ),
         unsafe_allow_html=True,
@@ -384,7 +609,7 @@ def run_dashboard() -> None:
 
     studio_placeholder = st.empty()
 
-    if control["run_clicked"]:
+    if control.run_clicked:
         _run_pipeline_from_ui(control, studio_placeholder)
 
     run_result = get_run_result()

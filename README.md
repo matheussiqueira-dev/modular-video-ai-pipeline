@@ -1,114 +1,116 @@
 # Frontend Vision Studio
 
-Interface frontend profissional para o **Modular Video AI Pipeline**, projetada para configurar, executar e analisar processamento de video com foco em usabilidade, acessibilidade e observabilidade.
+Aplicacao frontend profissional para operacao e analise do pipeline de video AI, com foco em UX de alto nivel, acessibilidade, performance e arquitetura frontend escalavel.
 
 ## Visao Geral do Frontend
 
-O frontend foi desenhado para operadores e times tecnicos que precisam:
+O Frontend Vision Studio foi desenhado para operadores, analistas e equipes de engenharia que precisam configurar, executar e investigar processamento de video com alto controle visual.
 
-- subir videos rapidamente
-- configurar parametros de processamento sem editar codigo
-- acompanhar execucao com feedback visual
-- investigar eventos com filtros e visualizacoes
-- exportar resultados para auditoria e analise externa
+### Proposito
 
-### Fluxo principal
+- reduzir friccao operacional no uso do pipeline
+- acelerar iteracao de parametros
+- melhorar leitura de resultados e eventos
+- permitir operacao local ou remota (via API backend)
+
+### Fluxo principal do usuario
 
 1. Upload do video
-2. Selecao de preset ou configuracao manual
-3. Definicao/validacao de zonas monitoradas
-4. Execucao com progresso em tempo real
-5. Analise de resultados (video, tabela, timeline, historico)
+2. Escolha de preset ou configuracao manual
+3. Definicao e validacao de zonas monitoradas
+4. Execucao (Local Engine ou Backend API)
+5. Analise de resultados, comparacao de runs e exportacao de artefatos
 
-## Analise Frontend (estado atual apos refactor)
+## Analise Frontend (arquitetura atual)
 
-### Arquitetura e organizacao
+### Organizacao e padroes
 
-A camada frontend foi modularizada para facilitar manutencao e crescimento:
+Camada frontend modularizada em responsabilidades claras:
 
-- `src/ui/dashboard.py`: composicao do fluxo da aplicacao
-- `src/ui/theme.py`: tokens visuais e estilos globais
-- `src/ui/presets.py`: presets operacionais por contexto
-- `src/ui/parsers.py`: parsing e validacao de zonas
-- `src/ui/analytics.py`: leitura/filtro/sumarizacao de telemetria
-- `src/ui/state.py`: gerenciamento de estado de sessao
-- `src/ui/components/panels.py`: blocos de UI reutilizaveis
+- `src/ui/dashboard.py`: orquestracao da experiencia
+- `src/ui/theme.py`: design tokens e estilos globais
+- `src/ui/components/panels.py`: componentes reutilizaveis e visualizacao
+- `src/ui/analytics.py`: parsing, filtros e sumarios de telemetria
+- `src/ui/parsers.py`: validacao e normalizacao de entrada
+- `src/ui/profiles.py`: perfis salvos de configuracao
+- `src/ui/insights.py`: comparacao entre execucoes
+- `src/ui/api_client.py`: integracao com backend remoto
+- `src/ui/state.py`: estado de sessao
 
-### Performance e escalabilidade
+### Pontos tecnicos resolvidos no refactor
 
-- processamento configuravel por `ocr_interval` e `cluster_interval`
-- callback de progresso para feedback continuo sem bloquear UX
-- exportacao JSONL incremental para analise posterior
-- historico local de execucoes para comparacao rapida de configuracoes
+- reducao de acoplamento no dashboard com contratos tipados
+- reducao de duplicacao em fluxos de execucao local/remota
+- melhoria de robustez em parsing de analytics por arquivo e por bytes
+- centralizacao de componentes de interface e graficos
 
-### Acessibilidade e responsividade
+### Performance, estado e escalabilidade
 
-- modo de alto contraste
+- fluxo incremental de progresso por frame/job
+- filtros client-side eficientes para analytics
+- possibilidade de escalar processamento para backend API
+- gerenciamento de estado previsivel via `st.session_state`
+
+### Acessibilidade, responsividade e SEO
+
+- modo alto contraste
 - modo de reducao de movimento
-- componentes com labels explicitos e feedback de validacao
-- layout adaptativo com grid responsivo e sidebar funcional
+- layout responsivo e hierarquia visual clara
+- SEO publico limitado por natureza do Streamlit (server-rendered app)
 
-### SEO
+## UI/UX Refactor (nivel senior)
 
-Como o frontend usa Streamlit (app server-side), SEO indexavel publico e limitado por natureza arquitetural.
-Para paginas publicas com estrategia SEO forte, recomenda-se frontend web dedicado (React/Next.js) consumindo os mesmos artefatos.
+### Melhorias aplicadas
+
+- design system com tokens visuais reutilizaveis
+- componentes visuais consistentes para metricas e paines
+- feedback de progresso em tempo real (local e remoto)
+- comparativo entre run atual e run anterior
+- charts de performance, timeline e distribuicao de severidade
+- fluxo de exportacao direta de video, JSONL e CSV filtrado
+
+### Microinteracoes e usabilidade
+
+- feedback contextual em validacoes de zona
+- mensagens operacionais durante execucao e polling remoto
+- persistencia de historico da sessao para tomada de decisao
+
+## Features Frontend Implementadas
+
+1. Execucao dual: `Local Engine` e `Backend API`
+2. Presets operacionais por contexto
+3. Perfis salvos de configuracao (save/load)
+4. Comparacao de resultados entre execucoes
+5. Explorer de analytics com filtros multicriterio
+6. Exportacao de artefatos e eventos filtrados
 
 ## Stack e Tecnologias
 
 - Python 3.10+
 - Streamlit
 - Pandas
-- Plotly (graficos, com fallback seguro quando ausente)
-- NumPy
-- OpenCV
+- Plotly
+- Requests
 - PyTest
 
-## Features Frontend Implementadas
-
-- Design system leve com tokens visuais reutilizaveis
-- Presets de operacao (`Sports Analytics`, `Retail Monitoring`, `Security Patrol`)
-- Validacao assistida de zonas com avisos contextuais
-- Barra de progresso e status frame-a-frame
-- Analytics Explorer com filtros combinados:
-  - tipo de evento
-  - severidade
-  - object IDs
-  - busca textual
-- Exportacao de artefatos:
-  - video processado
-  - analytics JSONL
-  - eventos filtrados em CSV
-- Historico de execucoes na sessao
-
-## Estrutura do Projeto
+## Estrutura do Projeto (frontend)
 
 ```text
-modular-video-ai-pipeline/
-├── app.py
-├── demo.py
-├── requirements.txt
-├── src/
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── exporters.py
-│   │   └── pipeline.py
-│   ├── ui/
-│   │   ├── __init__.py
-│   │   ├── dashboard.py
-│   │   ├── theme.py
-│   │   ├── presets.py
-│   │   ├── parsers.py
-│   │   ├── analytics.py
-│   │   ├── state.py
-│   │   └── components/
-│   │       ├── __init__.py
-│   │       └── panels.py
-│   └── ...
-└── tests/
-    ├── test_pipeline.py
-    ├── test_ui_parsers.py
-    ├── test_ui_analytics.py
-    └── ...
+src/ui/
+├── __init__.py
+├── dashboard.py
+├── contracts.py
+├── theme.py
+├── components/
+│   ├── __init__.py
+│   └── panels.py
+├── analytics.py
+├── parsers.py
+├── presets.py
+├── profiles.py
+├── insights.py
+├── state.py
+└── api_client.py
 ```
 
 ## Setup e Execucao
@@ -126,51 +128,53 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Rodar Frontend
+### 2. Executar frontend
 
 ```bash
 streamlit run app.py
 ```
 
-### 3. Rodar via CLI (suporte)
+### 3. Opcional: executar backend para modo remoto
 
 ```bash
-python demo.py --video_path input.mp4 --output_path output.mp4 --export_jsonl outputs/analytics.jsonl
+# Windows (exemplo)
+set PIPELINE_API_KEYS=admin-key:admin,ops-key:operator,viewer-key:viewer
+python server.py
 ```
 
-## Build
+## Build e Deploy
 
-Por ser Streamlit, nao existe etapa de bundle frontend tradicional (webpack/vite build).
-Em producao, recomenda-se:
+Como Streamlit nao usa bundle frontend tradicional, o deploy recomendado e:
 
-1. containerizar app (`Docker`)
-2. configurar variaveis e volumes de saida
-3. publicar atras de proxy reverso (Nginx/Traefik)
+1. containerizar frontend e backend separadamente
+2. publicar API atras de proxy reverso
+3. persistir runtime (`runtime/`) em volume dedicado
+4. configurar variaveis de ambiente seguras para API keys
 
-## Qualidade e Testes
+## Boas Praticas Adotadas
+
+- separacao clara de responsabilidades
+- componentes reutilizaveis e tokens visuais
+- validacao de entrada antes do processamento
+- contratos de dados consistentes
+- fallback de visualizacao quando dependencias opcionais faltam
+- testes automatizados para regressao
+
+## Qualidade
 
 ```bash
 python -m pytest tests -q
 ```
 
-Suite atual contempla modulos de pipeline e frontend utilitario (parsers e analytics).
-
-## Boas Praticas Adotadas
-
-- modularizacao por responsabilidade
-- design tokens centralizados
-- fallback para dependencia opcional (`plotly`)
-- estado de sessao explicito e controlado
-- validacoes de entrada antes da execucao
-- exportacao estruturada para rastreabilidade
+Status atual: **40 testes passando**.
 
 ## Melhorias Futuras
 
-- comparador visual entre duas execucoes (A/B de parametros)
-- autenticao e perfis de permissao para operacao multiusuario
-- pagina de configuracoes persistentes por ambiente
-- notificacoes em tempo real (webhook/Slack/email)
-- frontend dedicado SPA/SSR para SEO publico
+- comparador visual lado a lado entre duas execucoes
+- persistencia de perfis em storage permanente
+- notificacoes em tempo real para finalizacao de job remoto
+- modo colaborativo multiusuario com permissao por workspace
+- migracao para frontend SPA/SSR quando SEO publico for requisito critico
 
 ## Licenca
 

@@ -20,6 +20,13 @@ def init_session_state() -> None:
         "high_contrast": False,
         "reduced_motion": False,
         "mock_mode": True,
+        "execution_target": "Local Engine",
+        "backend_base_url": "http://localhost:8000",
+        "backend_api_key": "",
+        "backend_poll": 1.2,
+        "config_profiles": [],
+        "profile_name_input": "",
+        "selected_profile_name": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -38,6 +45,8 @@ def save_run_result(payload: Dict) -> None:
             "frames": int(payload.get("summary", {}).get("frames_processed", 0)),
             "events": int(payload.get("summary", {}).get("events_detected", 0)),
             "avg_fps": round(float(payload.get("summary", {}).get("average_processing_fps", 0.0)), 2),
+            "summary": dict(payload.get("summary", {})),
+            "execution_target": payload.get("execution_target", "Local Engine"),
         },
     )
     st.session_state["run_history"] = history[:10]

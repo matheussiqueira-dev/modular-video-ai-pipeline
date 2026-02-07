@@ -1,102 +1,115 @@
 # Architecture Documentation
 
-## Overview
+## 1. System Purpose
 
-This repository implements a modular video analysis pipeline focused on **production maintainability** and **incremental extensibility**.
-The system runs in deterministic mock mode by default, allowing local validation without model weights.
+The platform delivers a modular video intelligence workflow for operational scenarios such as sports analytics, retail monitoring, and security supervision. It supports both local execution and API-driven orchestration.
 
-## Core Architectural Principles
-
-1. Single responsibility per module
-2. Contract-driven data flow between stages
-3. Deterministic behavior in development mode
-4. Progressive enhancement (mock -> real models)
-5. Observability through structured telemetry (`JSONL`)
-
-## High-Level Flow
+## 2. High-Level Architecture
 
 ```mermaid
 graph LR
-    A[Video Source] --> B[ObjectDetector]
-    B --> C[VideoSegmenter]
-    C --> D[VisualIdentifier]
-    D --> E[SceneTextReader]
-    E --> F[PerspectiveTransformer]
-    F --> G[EventAnalyzer]
-    G --> H[PipelineVisualizer]
-    H --> I[Annotated Video]
-    G --> J[JSONL Exporter]
+  A[Frontend Studio - Streamlit] -->|Local Engine| B[VisionPipeline]
+  A -->|Backend API| C[FastAPI /api/v1]
+  C --> D[Job Repository SQLite]
+  C --> E[PipelineJobService]
+  E --> B
+  B --> F[Annotated Video MP4]
+  B --> G[Telemetry JSONL]
+  D --> C
+  C --> A
 ```
 
-## Main Components
+## 3. Architectural Decisions
 
-### 1. Orchestration (`src/core/pipeline.py`)
+1. **Dual execution strategy (local + remote API)**
+   - Local mode accelerates prototyping.
+   - API mode enables separation of concerns, role-based access, and service-style deployment.
 
-`VisionPipeline` coordinates all processing stages frame-by-frame:
-- detection
-- tracking/segmentation
-- clustering refresh (configurable interval)
-- OCR refresh (configurable interval)
-- world-coordinate projection
-- temporal event analysis
-- annotated rendering
-- telemetry export
+2. **Job-based backend processing**
+   - Long-running pipeline tasks are represented as jobs with lifecycle states.
+   - Job metadata is persisted in SQLite for auditability and recovery.
 
-### 2. Processing Modules
+3. **Deterministic mock mode**
+   - All core modules can operate in deterministic mock mode to keep tests and development reproducible.
 
-- `src/detection/detector.py`
-  - deterministic mock detections with validation and confidence filtering
-- `src/segmentation/segmenter.py`
-  - IoU-based ID association with missing-frame tolerance
-- `src/clustering/identifier.py`
-  - deterministic embeddings from resized crops and KMeans clustering
-- `src/ocr/reader.py`
-  - mock OCR heuristic with track-level cache
-- `src/homography/transformer.py`
-  - robust homography computation and point transforms
-- `src/events/analyzer.py`
-  - state machine for dwell + zone entry/exit events with cooldown
-- `src/visualization/drawer.py`
-  - modern HUD overlay with readable hierarchy and event feed
+4. **Structured telemetry contract**
+   - JSONL output is append-only and machine-readable.
+   - Event and frame records are unified for dashboard analytics and external integrations.
 
-### 3. UI Layer (`src/ui/dashboard.py`)
+## 4. Layers and Responsibilities
 
-A Streamlit interface provides:
-- video upload
-- pipeline parameter tuning
-- zone definition
-- execution trigger
-- output video preview
-- event table visualization
+### Frontend Layer (`src/ui`)
+- `dashboard.py`: application flow and user interaction.
+- `theme.py`: design tokens and accessibility modes.
+- `components/panels.py`: reusable visual blocks/charts.
+- `analytics.py`: telemetry parsing, filtering, summarization.
+- `api_client.py`: REST integration for backend execution.
+- `state.py`: session and run-history state.
 
-## Data Contracts
+### API Layer (`src/api`)
+- `app.py`: versioned REST endpoints, middleware, validation, responses.
+- `security.py`: API-key authentication and role-based authorization.
+- `repository.py`: SQLite persistence for job lifecycle.
+- `service.py`: pipeline orchestration for submitted jobs.
+- `schemas.py`: request/response contracts.
 
-Inter-stage payloads use normalized dictionaries with stable keys:
+### Core Processing Layer (`src/core` + domain modules)
+- `VisionPipeline` coordinates detector, segmenter, identifier, OCR, homography, events, and visualizer.
+- `JsonlExporter` writes telemetry with stable record contracts.
 
-- Detection:
-  - `bbox`, `label`, `score`, `class_id`
-- Track:
-  - `id`, `bbox`, `mask`, `class_id`, `label`, optional `cluster_id`, `ocr_text`, `world_position`
-- Event:
-  - `frame`, `type`, `object_id`, `details`, `severity`
+## 5. API Contract (`/api/v1`)
 
-## Performance and Scalability Considerations
+### Endpoints
+- `GET /api/v1/health`
+- `POST /api/v1/jobs` (multipart upload + params)
+- `GET /api/v1/jobs`
+- `GET /api/v1/jobs/{job_id}`
+- `GET /api/v1/jobs/{job_id}/events`
+- `GET /api/v1/jobs/{job_id}/artifacts/video`
+- `GET /api/v1/jobs/{job_id}/artifacts/analytics`
 
-- Intervals (`ocr_interval`, `clustering_interval`) reduce unnecessary heavy calls
-- Track cache and OCR cache reduce recomputation
-- JSONL export is append-only and stream-friendly
-- Mock mode keeps CI and local iteration fast
+### Auth Model
+- Header: `X-API-Key`
+- Roles:
+  - `admin`: read/write jobs + artifact access
+  - `operator`: read/write jobs + artifact access
+  - `viewer`: read-only jobs/artifacts
 
-## Extension Points
+### Security Controls
+- input validation and bounded parameters
+- file extension and upload-size guardrails
+- role-based permission checks
+- request-id middleware for traceability
 
-1. Replace `ObjectDetector` mock with RF-DETR inference
-2. Replace `VideoSegmenter` mock masks with SAM2 masks
-3. Add custom event policies in `EventAnalyzer`
-4. Add dashboard analytics charts from JSONL history
-5. Add distributed processing for multi-camera scenarios
+## 6. Data and Integrity
 
-## Testing Strategy
+- Job metadata is stored in SQLite (`runtime/api_jobs.sqlite3`).
+- Artifacts are stored under `runtime/uploads` and `runtime/outputs`.
+- JSON payloads and zone definitions are serialized consistently to preserve replayability and operational audit.
 
-- Unit tests for detector, segmenter, clustering
-- New tests for event analyzer behavior
-- Integration-like tests for pipeline execution and artifacts
+## 7. Observability and Error Handling
+
+- Request ID and response time headers are returned by middleware.
+- Structured failures are surfaced with consistent error responses.
+- Job failures are persisted with error message and state transition to `failed`.
+
+## 8. Performance Strategy
+
+- OCR and clustering are frame-interval based (configurable).
+- Backend jobs can run asynchronously, with client-side polling.
+- Cached cluster/OCR assignments reduce repeated computation.
+
+## 9. Test Strategy
+
+- Unit tests for core domain modules.
+- API tests for auth and job lifecycle.
+- UI utility tests for parser and analytics modules.
+- Deterministic mock behavior keeps test runs stable across environments.
+
+## 10. Future Extensions
+
+1. Queue backend with Redis/Celery for distributed workers.
+2. Persistent object storage (S3/MinIO) for artifacts.
+3. OAuth2/JWT and tenant-aware authorization.
+4. Metrics export (Prometheus/OpenTelemetry).
+5. GraphQL facade for analytics consumers.
