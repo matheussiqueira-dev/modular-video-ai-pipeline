@@ -99,6 +99,7 @@ class VisionPipeline:
         max_frames: int,
         exporter: Optional[JsonlExporter] = None,
         progress_callback: Optional[Callable[[int, int, Dict[str, float]], None]] = None,
+        stop_callback: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, float]:
         cap = None
         if video_path and Path(video_path).exists():
@@ -112,9 +113,14 @@ class VisionPipeline:
         writer = None
         frame_idx = 0
         total_events = 0
+        stopped_early = False
 
         try:
             while frame_idx < max_frames:
+                if stop_callback is not None and stop_callback():
+                    stopped_early = True
+                    break
+
                 if cap is not None:
                     ok, frame = cap.read()
                     if not ok:
@@ -176,6 +182,7 @@ class VisionPipeline:
             "frames_processed": frame_idx,
             "events_detected": total_events,
             "average_processing_fps": avg_fps,
+            "stopped_early": stopped_early,
         }
 
     def _attach_world_positions(self, tracks: List[dict]) -> None:

@@ -1,7 +1,7 @@
 import importlib
 import os
 import sys
-from pathlib import Path
+import time
 
 import pytest
 
@@ -24,6 +24,7 @@ def api_client(tmp_path, monkeypatch):
     monkeypatch.setenv("PIPELINE_API_KEYS", "admin-test:admin,viewer-test:viewer")
     monkeypatch.setenv("PIPELINE_API_WORKERS", "1")
     monkeypatch.setenv("PIPELINE_MAX_UPLOAD_MB", "50")
+    monkeypatch.setenv("PIPELINE_RATE_LIMIT_REQUESTS", "500")
 
     if "src.api.app" in sys.modules:
         module = importlib.reload(sys.modules["src.api.app"])
@@ -35,6 +36,24 @@ def api_client(tmp_path, monkeypatch):
         yield client
     finally:
         client.close()
+
+
+def _create_job(client, *, async_mode: bool = False, idempotency_key: str | None = None, max_frames: int = 20):
+    files = {"file": ("sample.mp4", _fake_video_bytes(), "application/octet-stream")}
+    data = {
+        "max_frames": str(max_frames),
+        "fps": "24",
+        "ocr_interval": "5",
+        "clustering_interval": "3",
+        "mock_mode": "true",
+        "async_mode": "true" if async_mode else "false",
+        "zones_json": "[{\"name\":\"gate\",\"x1\":10,\"y1\":10,\"x2\":80,\"y2\":80}]",
+    }
+    headers = {"X-API-Key": "admin-test"}
+    if idempotency_key:
+        headers["X-Idempotency-Key"] = idempotency_key
+
+    return client.post("/api/v1/jobs", files=files, data=data, headers=headers)
 
 
 def test_healthcheck_public(api_client):
@@ -66,27 +85,13 @@ def test_viewer_cannot_create_job(api_client):
 
 
 def test_admin_can_create_sync_job_and_download_artifacts(api_client):
-    files = {"file": ("sample.mp4", _fake_video_bytes(), "application/octet-stream")}
-    data = {
-        "max_frames": "20",
-        "fps": "24",
-        "ocr_interval": "5",
-        "clustering_interval": "3",
-        "mock_mode": "true",
-        "async_mode": "false",
-        "zones_json": "[{\"name\":\"gate\",\"x1\":10,\"y1\":10,\"x2\":80,\"y2\":80}]",
-    }
-
-    created = api_client.post("/api/v1/jobs", files=files, data=data, headers={"X-API-Key": "admin-test"})
+    created = _create_job(api_client, async_mode=False)
     assert created.status_code == 200
     payload = created.json()
     job_id = payload["job_id"]
 
     detail = api_client.get(f"/api/v1/jobs/{job_id}", headers={"X-API-Key": "admin-test"})
     assert detail.status_code == 200
-    assert detail.json()["status"] in {"completed", "failed", "running", "queued"}
-
-    # Synchronous mode should complete before response; assert completion for deterministic test.
     assert detail.json()["status"] == "completed"
 
     events = api_client.get(f"/api/v1/jobs/{job_id}/events", headers={"X-API-Key": "admin-test"})
@@ -100,3 +105,73 @@ def test_admin_can_create_sync_job_and_download_artifacts(api_client):
     analytics = api_client.get(f"/api/v1/jobs/{job_id}/artifacts/analytics", headers={"X-API-Key": "admin-test"})
     assert analytics.status_code == 200
     assert len(analytics.content) > 0
+
+
+def test_idempotency_key_reuses_existing_job(api_client):
+    first = _create_job(api_client, async_mode=False, idempotency_key="idem-001")
+    second = _create_job(api_client, async_mode=False, idempotency_key="idem-001")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["job_id"] == second.json()["job_id"]
+
+
+def test_list_jobs_supports_filters(api_client):
+    created = _create_job(api_client, async_mode=False)
+    job_id = created.json()["job_id"]
+
+    by_status = api_client.get("/api/v1/jobs", params={"status": "completed"}, headers={"X-API-Key": "admin-test"})
+    assert by_status.status_code == 200
+    assert by_status.json()["total"] >= 1
+
+    by_role = api_client.get(
+        "/api/v1/jobs", params={"requested_by": "admin"}, headers={"X-API-Key": "admin-test"}
+    )
+    assert by_role.status_code == 200
+    ids = [item["job_id"] for item in by_role.json()["items"]]
+    assert job_id in ids
+
+
+def test_metrics_endpoint(api_client):
+    _create_job(api_client, async_mode=False)
+    response = api_client.get("/api/v1/jobs/metrics", headers={"X-API-Key": "admin-test"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_jobs"] >= 1
+    assert "avg_processing_fps" in body
+
+
+def test_retry_job_creates_new_job(api_client):
+    created = _create_job(api_client, async_mode=False)
+    original_job_id = created.json()["job_id"]
+
+    retried = api_client.post(
+        f"/api/v1/jobs/{original_job_id}/retry", params={"async_mode": "false"}, headers={"X-API-Key": "admin-test"}
+    )
+    assert retried.status_code == 200
+
+    retry_job_id = retried.json()["job_id"]
+    assert retry_job_id != original_job_id
+
+
+def test_cancel_job_flow(api_client):
+    created = _create_job(api_client, async_mode=True, max_frames=300)
+    assert created.status_code == 200
+    job_id = created.json()["job_id"]
+
+    cancelled = api_client.post(f"/api/v1/jobs/{job_id}/cancel", headers={"X-API-Key": "admin-test"})
+    assert cancelled.status_code == 200
+    assert cancelled.json()["cancel_requested"] is True
+
+    deadline = time.time() + 15
+    last_status = None
+    while time.time() < deadline:
+        detail = api_client.get(f"/api/v1/jobs/{job_id}", headers={"X-API-Key": "admin-test"})
+        assert detail.status_code == 200
+        last_status = detail.json()["status"]
+        if last_status in {"cancelled", "completed", "failed"}:
+            break
+        time.sleep(0.2)
+
+    assert last_status in {"cancelled", "completed", "failed"}

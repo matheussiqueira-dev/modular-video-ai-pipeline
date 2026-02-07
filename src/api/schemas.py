@@ -12,6 +12,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ZoneIn(BaseModel):
@@ -56,6 +57,8 @@ class JobSummary(BaseModel):
     processed_frames: int = 0
     summary: Optional[dict] = None
     error_message: Optional[str] = None
+    cancel_requested: bool = False
+    idempotency_key: Optional[str] = None
 
 
 class JobListResponse(BaseModel):
@@ -67,6 +70,22 @@ class JobEventsResponse(BaseModel):
     job_id: str
     count: int
     items: List[dict]
+
+
+class JobCancelResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    cancel_requested: bool
+
+
+class JobMetricsResponse(BaseModel):
+    total_jobs: int
+    queued: int
+    running: int
+    completed: int
+    failed: int
+    cancelled: int
+    avg_processing_fps: float
 
 
 class ErrorResponse(BaseModel):

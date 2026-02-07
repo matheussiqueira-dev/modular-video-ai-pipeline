@@ -84,3 +84,21 @@ def test_run_video_generates_output_and_summary(tmp_path):
     assert summary["average_processing_fps"] > 0
     assert len(callback_calls) == config.max_frames
     assert callback_calls[-1][0] == config.max_frames
+
+
+def test_run_video_can_stop_early(tmp_path):
+    pipeline, config = _build_pipeline(tmp_path)
+
+    def _should_stop():
+        return True
+
+    summary = pipeline.run_video(
+        video_path=None,
+        output_path=config.output_path,
+        max_frames=config.max_frames,
+        exporter=None,
+        stop_callback=_should_stop,
+    )
+
+    assert summary["stopped_early"] is True
+    assert int(summary["frames_processed"]) == 0

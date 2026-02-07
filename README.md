@@ -1,114 +1,119 @@
-# Frontend Vision Studio
+# Modular Video AI Pipeline - Backend
 
-Frontend profissional para configuracao, execucao e analise de processamento de video com foco em usabilidade, acessibilidade, performance e escalabilidade operacional.
+Backend profissional para orquestracao de jobs de analise de video com API REST versionada, controle de acesso por papel, persistencia de metadados e entrega de artefatos processados.
 
-## Visao Geral do Frontend
+## Visao Geral do Backend
 
-O Frontend Vision Studio atende operadores e times tecnicos que precisam executar pipelines de video com controle visual e analitico.
+Este backend oferece uma camada de servico para processamento de video orientado a jobs, com foco em confiabilidade operacional e evolucao para ambientes de producao.
 
-### Publico-alvo
-- analistas operacionais
-- engenheiros de dados/visao computacional
-- times de monitoramento e inteligencia
+### Dominio principal
 
-### Fluxo principal
-1. upload de video
-2. selecao de preset/perfil
-3. validacao de zonas monitoradas
-4. execucao local ou via backend API
-5. leitura de resultados, comparacao de runs e exportacao
+- submissao de jobs de processamento de video
+- acompanhamento de status/progresso
+- leitura de eventos detectados
+- download de artefatos (video anotado e telemetria)
+- cancelamento e retry de jobs
 
-## Analise Tecnica do Frontend
+### Objetivo de negocio
 
-### Arquitetura
-A camada `src/ui` foi organizada por responsabilidades:
+- reduzir friccao na operacao de pipelines de video
+- padronizar execucao e observabilidade em um endpoint unico
+- habilitar integracoes externas com contratos claros de API
 
-- `dashboard.py`: orquestracao da aplicacao
-- `theme.py`: design tokens e estilos globais
-- `components/panels.py`: componentes reutilizaveis
-- `analytics.py`: parsing, filtro e sumarios
-- `contracts.py`: contratos tipados de controle/payload
-- `profiles.py`: gerenciamento de perfis salvos
-- `insights.py`: comparador entre execucoes
-- `video_advisor.py`: assistente de configuracao por metadados do video
-- `api_client.py`: integracao com backend remoto
-- `state.py`: estado de sessao
+## Arquitetura Adotada
 
-### Pontos de melhoria enderecados
-- reducao de acoplamento no fluxo principal
-- maior previsibilidade de estado
-- reducao de duplicacao em configuracao e comparacao
-- melhoria de feedback visual durante processamento
+Arquitetura modular (monolito modular), separada por camadas:
 
-### Performance e escalabilidade
-- parsing eficiente de analytics em memoria
-- filtros client-side em DataFrame
-- polling configuravel para jobs remotos
-- suporte dual-run (local e backend), facilitando crescimento operacional
+- `src/api/app.py`: camada HTTP (FastAPI), roteamento, middlewares e contratos
+- `src/api/security.py`: autenticacao por API key, autorizacao e rate limiting
+- `src/api/repository.py`: persistencia SQLite e consultas de jobs
+- `src/api/service.py`: orquestracao de processamento de jobs
+- `src/core/pipeline.py`: motor de pipeline de visao computacional
 
-### Acessibilidade e responsividade
-- modo alto contraste
-- reducao de movimento
-- foco visivel em elementos interativos
-- layout responsivo e hierarquia visual consistente
+### Padroes aplicados
 
-### SEO
-Por ser Streamlit, SEO indexavel publico e limitado por arquitetura server-side da ferramenta.
+- Single Responsibility por modulo
+- separacao entre camada de API, servico e persistencia
+- validacao de entrada com Pydantic
+- contratos de resposta tipados
+- fluxo de erro consistente
 
-## UI/UX Refactor (Senior)
+## Recursos e Features Backend Implementadas
 
-### Melhorias aplicadas
-- design system com tokens e componentes consistentes
-- cards de KPI, comparativo de execucoes e dashboards analiticos
-- microinteracoes de feedback em validacoes e status de job
-- experiencia orientada a operacao real (studio + analytics + history + review)
+1. API REST versionada (`/api/v1`)
+2. Autenticacao via `X-API-Key`
+3. Autorizacao por papeis (`admin`, `operator`, `viewer`)
+4. Rate limiting por API key (janela fixa)
+5. Idempotencia em criacao de job (`X-Idempotency-Key`)
+6. Cancelamento de jobs em execucao
+7. Retry de jobs existentes
+8. Filtros em listagem (`status`, `requested_by`)
+9. Endpoint de metricas agregadas de jobs
+10. Persistencia de metadados em SQLite + artefatos em filesystem
 
-### Navegacao e interacao
-- tabs dedicadas por contexto de uso
-- perfis de configuracao (save/load)
-- assistente de configuracao automatica por caracteristicas do video
+## Seguranca e Confiabilidade
 
-## Features Implementadas
+### Autenticacao e autorizacao
 
-1. Execucao dual (`Local Engine` e `Backend API`)
-2. Presets e perfis salvos de configuracao
-3. Assistente inteligente de parametros (`video_advisor`)
-4. Comparacao entre run atual e run anterior
-5. Analytics explorer com filtros multicriterio
-6. Exportacao de video, JSONL e CSV filtrado
+- header obrigatorio: `X-API-Key`
+- permissoes por papel:
+  - `admin`: leitura/escrita de jobs e leitura de artefatos
+  - `operator`: leitura/escrita de jobs e leitura de artefatos
+  - `viewer`: somente leitura
 
-## Stack e Tecnologias
+### Protecoes implementadas
+
+- validacao forte de payload e ranges de parametros
+- validacao de formato de arquivo e limite de upload
+- consultas SQL parametrizadas (mitigacao de SQL Injection)
+- rate limiting para reduzir abuso de endpoints
+- idempotencia para evitar criacao duplicada acidental
+- headers de seguranca em respostas (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`)
+
+### Tratamento de erros e observabilidade
+
+- middleware com `X-Request-ID`
+- medicao de latencia por request (`X-Response-Time-Ms`)
+- logging de metodo/path/status/duracao
+- respostas de erro padronizadas
+
+## Tecnologias Utilizadas
 
 - Python 3.10+
-- Streamlit
-- Pandas
-- Plotly
-- Requests
-- OpenCV
+- FastAPI
+- Uvicorn
+- Pydantic v2
+- SQLite (`sqlite3`)
+- OpenCV / NumPy (pipeline)
 - PyTest
 
-## Estrutura do Projeto (frontend)
+## Estrutura do Projeto (backend)
 
 ```text
-src/ui/
-├── __init__.py
-├── dashboard.py
-├── contracts.py
-├── theme.py
-├── state.py
-├── presets.py
-├── parsers.py
-├── profiles.py
-├── insights.py
-├── video_advisor.py
-├── analytics.py
-├── api_client.py
-└── components/
-    ├── __init__.py
-    └── panels.py
+src/
+├── api/
+│   ├── __init__.py
+│   ├── app.py
+│   ├── models.py
+│   ├── repository.py
+│   ├── schemas.py
+│   ├── security.py
+│   ├── service.py
+│   ├── settings.py
+│   └── validators.py
+├── core/
+│   ├── config.py
+│   ├── exporters.py
+│   └── pipeline.py
+└── ...
+
+server.py
+tests/test_api.py
 ```
 
-## Setup
+## Setup e Execucao
+
+### 1. Instalacao
 
 ```bash
 git clone https://github.com/matheussiqueira-dev/modular-video-ai-pipeline.git
@@ -121,53 +126,89 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Execucao
+### 2. Variaveis de ambiente
 
-### Frontend
 ```bash
-streamlit run app.py
+# Obrigatorio para producao
+PIPELINE_API_KEYS=admin-key:admin,ops-key:operator,viewer-key:viewer
+
+# Opcionais
+PIPELINE_RUNTIME_DIR=runtime
+PIPELINE_API_WORKERS=2
+PIPELINE_MAX_UPLOAD_MB=200
+PIPELINE_RATE_LIMIT_REQUESTS=300
+PIPELINE_RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
-### Backend opcional (modo remoto)
+### 3. Executar backend
+
 ```bash
-set PIPELINE_API_KEYS=admin-key:admin,ops-key:operator,viewer-key:viewer
 python server.py
 ```
 
-## Build e Deploy
+Documentacao interativa:
 
-Streamlit nao possui etapa de bundle frontend tradicional.
-Deploy recomendado:
+- Swagger: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
 
-1. containerizar frontend e backend separadamente
-2. usar proxy reverso para API
-3. persistir `runtime/` em volume
-4. configurar API keys por ambiente
+## Contrato de API
 
-## Boas Praticas Adotadas
+Base path: `/api/v1`
 
-- separacao de responsabilidades
-- contratos tipados para fluxos criticos
-- componentes reutilizaveis e consistentes
-- validacao de entrada e feedback contextual
-- foco em acessibilidade e UX operacional
-- testes automatizados para regressao
+### Principais endpoints
 
-## Qualidade
+- `GET /health`
+- `POST /jobs`
+- `GET /jobs`
+- `GET /jobs/metrics`
+- `GET /jobs/{job_id}`
+- `POST /jobs/{job_id}/cancel`
+- `POST /jobs/{job_id}/retry`
+- `GET /jobs/{job_id}/events`
+- `GET /jobs/{job_id}/artifacts/video`
+- `GET /jobs/{job_id}/artifacts/analytics`
+
+### Exemplo rapido (criar job)
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/jobs" \
+  -H "X-API-Key: admin-key" \
+  -H "X-Idempotency-Key: run-001" \
+  -F "file=@input.mp4" \
+  -F "max_frames=300" \
+  -F "fps=30" \
+  -F "ocr_interval=20" \
+  -F "clustering_interval=5" \
+  -F "mock_mode=true" \
+  -F "async_mode=true" \
+  -F "zones_json=[{\"name\":\"gate\",\"x1\":10,\"y1\":10,\"x2\":200,\"y2\":300}]"
+```
+
+## Qualidade e Testes
 
 ```bash
 python -m pytest tests -q
 ```
 
-Status atual: **43 testes passando**.
+Status atual: **48 testes passando**.
+
+## Boas Praticas e Padroes
+
+- arquitetura modular e orientada a camadas
+- contratos versionados de API
+- idempotencia para operacoes criticas
+- controle de acesso por permissao
+- rate limiting e validacao estrita de entrada
+- persistencia de estado para rastreabilidade
+- testes automatizados cobrindo fluxo principal e casos de seguranca
 
 ## Melhorias Futuras
 
-- comparador visual lado a lado entre duas execucoes
-- persistencia de perfis em storage duravel
-- notificacoes em tempo real para jobs remotos
-- auditoria de acessibilidade automatizada no pipeline CI
-- migracao para SPA/SSR quando SEO publico for prioridade
+- fila distribuida (Redis + workers dedicados)
+- armazenamento de artefatos em object storage (S3/MinIO)
+- observabilidade avancada (OpenTelemetry + Prometheus)
+- autenticacao OAuth2/JWT para cenarios multi-tenant
+- politica de retencao/limpeza automatica de artefatos
 
 ## Licenca
 

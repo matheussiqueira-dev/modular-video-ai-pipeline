@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
 from src.api.repository import JobRepository
+from src.api.schemas import JobStatus
 from src.clustering.identifier import VisualIdentifier
 from src.core.config import PipelineConfig
 from src.core.exporters import JsonlExporter
@@ -30,6 +30,10 @@ class PipelineJobService:
             self.logger.error("Job %s not found during processing", job_id)
             return
 
+        if job.get("status") == JobStatus.CANCELLED.value:
+            self.logger.info("Skipping cancelled job %s", job_id)
+            return
+
         payload = dict(job.get("payload", {}))
         zones = list(job.get("zones", []))
 
@@ -42,27 +46,7 @@ class PipelineJobService:
             clustering_interval=int(payload.get("clustering_interval", 5)),
         )
 
-        detector = ObjectDetector(mock_mode=bool(payload.get("mock_mode", True)))
-        segmenter = VideoSegmenter()
-        identifier = VisualIdentifier(mock_mode=bool(payload.get("mock_mode", True)))
-        reader = SceneTextReader(mock_mode=bool(payload.get("mock_mode", True)))
-        transformer = PerspectiveTransformer(
-            src_points=np.array([[0, 0], [1280, 0], [1280, 720], [0, 720]], dtype=np.float32),
-            dst_points=np.array([[0, 0], [100, 0], [100, 200], [0, 200]], dtype=np.float32),
-        )
-        analyzer = EventAnalyzer(fps=config.fps, dwell_seconds=3, zones=zones)
-        visualizer = PipelineVisualizer(title="API Session")
-
-        pipeline = VisionPipeline(
-            detector=detector,
-            segmenter=segmenter,
-            identifier=identifier,
-            reader=reader,
-            transformer=transformer,
-            analyzer=analyzer,
-            visualizer=visualizer,
-            config=config,
-        )
+        pipeline = self._build_pipeline(config=config, zones=zones, mock_mode=bool(payload.get("mock_mode", True)))
 
         def _progress(done_frames: int, total_frames: int, _stats: dict) -> None:
             self.repository.update_job_progress(
@@ -70,6 +54,9 @@ class PipelineJobService:
                 processed_frames=done_frames,
                 max_frames=total_frames,
             )
+
+        def _should_stop() -> bool:
+            return self.repository.is_cancel_requested(job_id)
 
         try:
             with JsonlExporter(config.export_jsonl_path) as exporter:
@@ -79,7 +66,17 @@ class PipelineJobService:
                     max_frames=config.max_frames,
                     exporter=exporter,
                     progress_callback=_progress,
+                    stop_callback=_should_stop,
                 )
+
+            if bool(summary.get("stopped_early", False)):
+                self.repository.mark_cancelled(
+                    job_id=job_id,
+                    processed_frames=int(summary.get("frames_processed", 0)),
+                    max_frames=config.max_frames,
+                )
+                return
+
             self.repository.complete_job(
                 job_id=job_id,
                 summary=summary,
@@ -89,3 +86,27 @@ class PipelineJobService:
         except Exception as exc:
             self.logger.exception("Failed to process job %s", job_id)
             self.repository.fail_job(job_id, str(exc))
+
+    @staticmethod
+    def _build_pipeline(config: PipelineConfig, zones: list[dict], mock_mode: bool) -> VisionPipeline:
+        detector = ObjectDetector(mock_mode=mock_mode)
+        segmenter = VideoSegmenter()
+        identifier = VisualIdentifier(mock_mode=mock_mode)
+        reader = SceneTextReader(mock_mode=mock_mode)
+        transformer = PerspectiveTransformer(
+            src_points=np.array([[0, 0], [1280, 0], [1280, 720], [0, 720]], dtype=np.float32),
+            dst_points=np.array([[0, 0], [100, 0], [100, 200], [0, 200]], dtype=np.float32),
+        )
+        analyzer = EventAnalyzer(fps=config.fps, dwell_seconds=3, zones=zones)
+        visualizer = PipelineVisualizer(title="API Session")
+
+        return VisionPipeline(
+            detector=detector,
+            segmenter=segmenter,
+            identifier=identifier,
+            reader=reader,
+            transformer=transformer,
+            analyzer=analyzer,
+            visualizer=visualizer,
+            config=config,
+        )
