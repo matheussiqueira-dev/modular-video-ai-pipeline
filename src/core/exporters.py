@@ -21,7 +21,10 @@ class JsonlExporter:
     def write(self, record_type: str, payload: Dict[str, Any]) -> None:
         if self._handle is None:
             return
-        row = {"type": record_type, **payload}
+        row = dict(payload)
+        row["record_type"] = record_type
+        if "type" not in row:
+            row["type"] = record_type
         self._handle.write(json.dumps(row, ensure_ascii=True) + "\n")
 
     def close(self) -> None:

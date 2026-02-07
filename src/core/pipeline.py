@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -98,6 +98,7 @@ class VisionPipeline:
         output_path: Path,
         max_frames: int,
         exporter: Optional[JsonlExporter] = None,
+        progress_callback: Optional[Callable[[int, int, Dict[str, float]], None]] = None,
     ) -> Dict[str, float]:
         cap = None
         if video_path and Path(video_path).exists():
@@ -158,6 +159,9 @@ class VisionPipeline:
                     )
                     for event in events:
                         exporter.write("event", event)
+
+                if progress_callback is not None:
+                    progress_callback(frame_idx + 1, max_frames, stats)
 
                 frame_idx += 1
 

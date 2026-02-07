@@ -1,4 +1,4 @@
-from src.ui.dashboard import run_dashboard
+from src.ui import run_dashboard
 
 
 run_dashboard()

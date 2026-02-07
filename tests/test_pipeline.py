@@ -64,6 +64,10 @@ def test_process_frame_outputs_visual_and_stats(tmp_path):
 
 def test_run_video_generates_output_and_summary(tmp_path):
     pipeline, config = _build_pipeline(tmp_path)
+    callback_calls = []
+
+    def _on_progress(done_frames, total_frames, stats):
+        callback_calls.append((done_frames, total_frames, stats))
 
     with JsonlExporter(config.export_jsonl_path) as exporter:
         summary = pipeline.run_video(
@@ -71,9 +75,12 @@ def test_run_video_generates_output_and_summary(tmp_path):
             output_path=config.output_path,
             max_frames=config.max_frames,
             exporter=exporter,
+            progress_callback=_on_progress,
         )
 
     assert config.output_path.exists()
     assert config.export_jsonl_path.exists()
     assert int(summary["frames_processed"]) == config.max_frames
     assert summary["average_processing_fps"] > 0
+    assert len(callback_calls) == config.max_frames
+    assert callback_calls[-1][0] == config.max_frames

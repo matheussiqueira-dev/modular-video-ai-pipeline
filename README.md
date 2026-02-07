@@ -1,57 +1,119 @@
-# Modular Video AI Pipeline
+# Frontend Vision Studio
 
-Pipeline modular para análise de vídeo com foco em arquitetura limpa, evolução contínua e operação em produção.
+Interface frontend profissional para o **Modular Video AI Pipeline**, projetada para configurar, executar e analisar processamento de video com foco em usabilidade, acessibilidade e observabilidade.
 
-## Visão Geral
+## Visao Geral do Frontend
 
-Este projeto processa vídeo quadro a quadro e combina múltiplos estágios de visão computacional:
+O frontend foi desenhado para operadores e times tecnicos que precisam:
 
-- detecção de objetos
-- segmentação/tracking com IDs estáveis
-- agrupamento visual (clustering)
-- leitura de texto em cena (OCR)
-- transformação espacial (homografia)
-- detecção de eventos temporais (dwell, entrada/saída de zona)
-- visualização avançada com HUD
+- subir videos rapidamente
+- configurar parametros de processamento sem editar codigo
+- acompanhar execucao com feedback visual
+- investigar eventos com filtros e visualizacoes
+- exportar resultados para auditoria e analise externa
 
-O sistema roda em **modo mock determinístico** por padrão, permitindo desenvolvimento e testes sem pesos pesados de modelos.
+### Fluxo principal
 
-## Público-Alvo
+1. Upload do video
+2. Selecao de preset ou configuracao manual
+3. Definicao/validacao de zonas monitoradas
+4. Execucao com progresso em tempo real
+5. Analise de resultados (video, tabela, timeline, historico)
 
-- times de engenharia de visão computacional
-- projetos de monitoramento e segurança
-- analytics esportivo e varejo
-- squads que precisam de base escalável para evoluir de protótipo para produção
+## Analise Frontend (estado atual apos refactor)
 
-## Tecnologias Utilizadas
+### Arquitetura e organizacao
+
+A camada frontend foi modularizada para facilitar manutencao e crescimento:
+
+- `src/ui/dashboard.py`: composicao do fluxo da aplicacao
+- `src/ui/theme.py`: tokens visuais e estilos globais
+- `src/ui/presets.py`: presets operacionais por contexto
+- `src/ui/parsers.py`: parsing e validacao de zonas
+- `src/ui/analytics.py`: leitura/filtro/sumarizacao de telemetria
+- `src/ui/state.py`: gerenciamento de estado de sessao
+- `src/ui/components/panels.py`: blocos de UI reutilizaveis
+
+### Performance e escalabilidade
+
+- processamento configuravel por `ocr_interval` e `cluster_interval`
+- callback de progresso para feedback continuo sem bloquear UX
+- exportacao JSONL incremental para analise posterior
+- historico local de execucoes para comparacao rapida de configuracoes
+
+### Acessibilidade e responsividade
+
+- modo de alto contraste
+- modo de reducao de movimento
+- componentes com labels explicitos e feedback de validacao
+- layout adaptativo com grid responsivo e sidebar funcional
+
+### SEO
+
+Como o frontend usa Streamlit (app server-side), SEO indexavel publico e limitado por natureza arquitetural.
+Para paginas publicas com estrategia SEO forte, recomenda-se frontend web dedicado (React/Next.js) consumindo os mesmos artefatos.
+
+## Stack e Tecnologias
 
 - Python 3.10+
-- OpenCV
+- Streamlit
+- Pandas
+- Plotly (graficos, com fallback seguro quando ausente)
 - NumPy
-- scikit-learn (KMeans)
-- Streamlit (dashboard)
-- Plotly/Pandas (analytics no dashboard)
-- PyTest (testes)
+- OpenCV
+- PyTest
 
-Dependências opcionais para modelos reais:
+## Features Frontend Implementadas
 
-- PyTorch
-- Transformers
-- Accelerate
+- Design system leve com tokens visuais reutilizaveis
+- Presets de operacao (`Sports Analytics`, `Retail Monitoring`, `Security Patrol`)
+- Validacao assistida de zonas com avisos contextuais
+- Barra de progresso e status frame-a-frame
+- Analytics Explorer com filtros combinados:
+  - tipo de evento
+  - severidade
+  - object IDs
+  - busca textual
+- Exportacao de artefatos:
+  - video processado
+  - analytics JSONL
+  - eventos filtrados em CSV
+- Historico de execucoes na sessao
 
-## Funcionalidades Principais
+## Estrutura do Projeto
 
-- Pipeline orquestrado por `VisionPipeline` (`src/core/pipeline.py`)
-- Tracking por IoU para manter consistência de IDs
-- OCR com cache por trilha para reduzir recomputação
-- Clustering com embeddings determinísticos em mock mode
-- Eventos temporais com anti-spam (cooldown)
-- Monitoramento por zonas configuráveis (entrada/saída)
-- Exportação de telemetria em JSONL (frames + eventos)
-- Overlay UI/UX refatorado com melhor hierarquia visual
-- Dashboard web para upload, configuração, execução e inspeção de resultados
+```text
+modular-video-ai-pipeline/
+├── app.py
+├── demo.py
+├── requirements.txt
+├── src/
+│   ├── core/
+│   │   ├── config.py
+│   │   ├── exporters.py
+│   │   └── pipeline.py
+│   ├── ui/
+│   │   ├── __init__.py
+│   │   ├── dashboard.py
+│   │   ├── theme.py
+│   │   ├── presets.py
+│   │   ├── parsers.py
+│   │   ├── analytics.py
+│   │   ├── state.py
+│   │   └── components/
+│   │       ├── __init__.py
+│   │       └── panels.py
+│   └── ...
+└── tests/
+    ├── test_pipeline.py
+    ├── test_ui_parsers.py
+    ├── test_ui_analytics.py
+    └── ...
+```
 
-## Instalação
+## Setup e Execucao
+
+### 1. Instalacao
 
 ```bash
 git clone https://github.com/matheussiqueira-dev/modular-video-ai-pipeline.git
@@ -64,89 +126,26 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Como Usar
-
-### 1. Execução via CLI
-
-```bash
-python demo.py \
-  --video_path input.mp4 \
-  --output_path output.mp4 \
-  --max_frames 300 \
-  --ocr_interval 30 \
-  --cluster_interval 5 \
-  --export_jsonl outputs/analytics.jsonl
-```
-
-Exemplo com zonas:
-
-```bash
-python demo.py \
-  --video_path input.mp4 \
-  --zone area_restrita:80,120,390,520 \
-  --zone entrada:900,120,1240,540
-```
-
-### 2. Execução via Dashboard
+### 2. Rodar Frontend
 
 ```bash
 streamlit run app.py
 ```
 
-Fluxo do dashboard:
+### 3. Rodar via CLI (suporte)
 
-1. upload do vídeo
-2. ajuste de parâmetros
-3. definição de zonas
-4. processamento
-5. visualização de vídeo anotado + tabela de eventos
-
-## Estrutura do Projeto
-
-```text
-modular-video-ai-pipeline/
-├── app.py
-├── demo.py
-├── requirements.txt
-├── README.md
-├── ARCHITECTURE.md
-├── src/
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── exporters.py
-│   │   └── pipeline.py
-│   ├── detection/
-│   │   └── detector.py
-│   ├── segmentation/
-│   │   └── segmenter.py
-│   ├── clustering/
-│   │   └── identifier.py
-│   ├── ocr/
-│   │   └── reader.py
-│   ├── homography/
-│   │   └── transformer.py
-│   ├── events/
-│   │   └── analyzer.py
-│   ├── visualization/
-│   │   └── drawer.py
-│   └── ui/
-│       └── dashboard.py
-└── tests/
-    ├── test_detector.py
-    ├── test_segmenter.py
-    ├── test_clustering.py
-    ├── test_events.py
-    └── test_pipeline.py
+```bash
+python demo.py --video_path input.mp4 --output_path output.mp4 --export_jsonl outputs/analytics.jsonl
 ```
 
-## Boas Práticas Aplicadas
+## Build
 
-- separação clara de responsabilidades por módulo
-- interfaces previsíveis entre etapas
-- validação de entrada e tratamento de edge cases
-- redução de custo computacional por intervalos configuráveis
-- logs e telemetria estruturada para observabilidade
-- testes automatizados cobrindo componentes críticos
+Por ser Streamlit, nao existe etapa de bundle frontend tradicional (webpack/vite build).
+Em producao, recomenda-se:
+
+1. containerizar app (`Docker`)
+2. configurar variaveis e volumes de saida
+3. publicar atras de proxy reverso (Nginx/Traefik)
 
 ## Qualidade e Testes
 
@@ -154,22 +153,28 @@ modular-video-ai-pipeline/
 python -m pytest tests -q
 ```
 
-Resultado esperado da suíte atual: **21 testes passando**.
+Suite atual contempla modulos de pipeline e frontend utilitario (parsers e analytics).
 
-## Possíveis Melhorias Futuras
+## Boas Praticas Adotadas
 
-- ativar inferência real (RF-DETR, SAM2, VLM) com fallback automático
-- suporte multi-câmera e correlação de identidades entre cenas
-- fila assíncrona para processamento distribuído
-- persistência em banco para analytics históricos
-- alertas em tempo real (webhook, e-mail, mensageria)
-- tuning adaptativo de thresholds por contexto operacional
+- modularizacao por responsabilidade
+- design tokens centralizados
+- fallback para dependencia opcional (`plotly`)
+- estado de sessao explicito e controlado
+- validacoes de entrada antes da execucao
+- exportacao estruturada para rastreabilidade
 
-## Licença
+## Melhorias Futuras
+
+- comparador visual entre duas execucoes (A/B de parametros)
+- autenticao e perfis de permissao para operacao multiusuario
+- pagina de configuracoes persistentes por ambiente
+- notificacoes em tempo real (webhook/Slack/email)
+- frontend dedicado SPA/SSR para SEO publico
+
+## Licenca
 
 MIT. Consulte `LICENSE`.
-
-## Autoria
 
 Autoria: Matheus Siqueira  
 Website: https://www.matheussiqueira.dev/
