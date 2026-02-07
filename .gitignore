@@ -79,3 +79,6 @@ resultado_teste.mp4
 
 # Logs
 *.log
+
+# Pipeline telemetry exports
+*.jsonl

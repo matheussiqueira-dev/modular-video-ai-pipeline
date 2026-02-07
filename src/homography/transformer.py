@@ -1,55 +1,64 @@
+from __future__ import annotations
 
 import logging
+from typing import Iterable, Tuple
+
 import cv2
 import numpy as np
 
+
 class PerspectiveTransformer:
-    """
-    Handles Homography transformations to map 2D video coordinates to a 2D top-down map/court.
-    """
-    def __init__(self, src_points: np.ndarray = None, dst_points: np.ndarray = None):
+    """Map camera coordinates to a top-down plane using homography."""
+
+    def __init__(self, src_points: np.ndarray | None = None, dst_points: np.ndarray | None = None):
         self.logger = logging.getLogger(__name__)
-        self.homography_matrix = None
-        
+        self.homography_matrix: np.ndarray | None = None
+
         if src_points is not None and dst_points is not None:
             self.compute_homography(src_points, dst_points)
 
-    def compute_homography(self, src_points: np.ndarray, dst_points: np.ndarray):
-        """
-        Computes the homography matrix from source (video) points to destination (map) points.
-        Both arrays should be shape (4, 2) or (N, 2).
-        """
-        self.homography_matrix, status = cv2.findHomography(src_points, dst_points)
-        if self.homography_matrix is None:
-            self.logger.warning("Could not compute homography matrix.")
-        else:
-            self.logger.info("Homography matrix computed successfully.")
+    def compute_homography(self, src_points: np.ndarray, dst_points: np.ndarray) -> None:
+        src = self._normalize_points(src_points)
+        dst = self._normalize_points(dst_points)
 
-    def transform_point(self, point: tuple) -> tuple:
-        """
-        Transforms a single (x, y) point from video space to map space.
-        """
-        if self.homography_matrix is None:
-            return point # Return original if no matrix (or logic to return None)
+        if src.shape[0] < 4 or dst.shape[0] < 4:
+            raise ValueError("At least 4 point correspondences are required for homography")
+        if src.shape != dst.shape:
+            raise ValueError("src_points and dst_points must have the same shape")
 
-        # Convert to homogenous coordinates
-        pt = np.array([point[0], point[1], 1.0])
-        # Project
-        dst_pt = self.homography_matrix @ pt
-        # Normalize
-        dst_pt = dst_pt / (dst_pt[2] + 1e-6)
-        
-        return (int(dst_pt[0]), int(dst_pt[1]))
+        matrix, _ = cv2.findHomography(src, dst)
+        if matrix is None:
+            self.logger.warning("Could not compute homography matrix. Keeping previous matrix.")
+            return
+
+        self.homography_matrix = matrix
+        self.logger.info("Homography matrix computed successfully.")
+
+    def transform_point(self, point: Tuple[int, int]) -> Tuple[int, int]:
+        if self.homography_matrix is None:
+            return int(point[0]), int(point[1])
+
+        source = np.array([[[float(point[0]), float(point[1])]]], dtype=np.float32)
+        transformed = cv2.perspectiveTransform(source, self.homography_matrix)
+        x, y = transformed[0, 0]
+        return int(round(float(x))), int(round(float(y)))
 
     def transform_points(self, points: np.ndarray) -> np.ndarray:
-        """
-        Transforms an array of points (N, 2).
-        """
         if self.homography_matrix is None:
-            return points
-            
-        if points.ndim == 1:
-            points = points.reshape(1, -1)
-            
-        transformed_points = cv2.perspectiveTransform(np.array([points], dtype=np.float32), self.homography_matrix)
-        return transformed_points[0]
+            return np.asarray(points, dtype=np.float32)
+
+        normalized = self._normalize_points(points)
+        transformed = cv2.perspectiveTransform(normalized.reshape(1, -1, 2), self.homography_matrix)
+        return transformed.reshape(-1, 2)
+
+    @staticmethod
+    def _normalize_points(points: Iterable) -> np.ndarray:
+        arr = np.asarray(points, dtype=np.float32)
+        if arr.ndim == 1:
+            if arr.shape[0] != 2:
+                raise ValueError("Single point must have shape (2,)")
+            arr = arr.reshape(1, 2)
+
+        if arr.ndim != 2 or arr.shape[1] != 2:
+            raise ValueError("Points must have shape (N, 2)")
+        return arr

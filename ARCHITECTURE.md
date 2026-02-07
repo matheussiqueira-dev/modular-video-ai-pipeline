@@ -2,174 +2,101 @@
 
 ## Overview
 
-The AI Vision Pipeline is designed with a **modular, layered architecture** that separates concerns and allows for easy extension and modification.
+This repository implements a modular video analysis pipeline focused on **production maintainability** and **incremental extensibility**.
+The system runs in deterministic mock mode by default, allowing local validation without model weights.
 
-## Design Principles
+## Core Architectural Principles
 
-1. **Modularity**: Each component is self-contained with clear interfaces
-2. **Flexibility**: Easy to swap implementations or add new features
-3. **Testability**: Mock modes allow testing without heavy dependencies
-4. **Performance**: Optimized for real-time or near-real-time processing
-5. **Maintainability**: Clean code with logging and error handling
+1. Single responsibility per module
+2. Contract-driven data flow between stages
+3. Deterministic behavior in development mode
+4. Progressive enhancement (mock -> real models)
+5. Observability through structured telemetry (`JSONL`)
 
-## System Architecture
+## High-Level Flow
 
-### Layer 1: Input Processing
-- **Video Capture**: Handles video streams or file inputs
-- **Frame Extraction**: Provides frames to the pipeline
-
-### Layer 2: Detection & Segmentation
-- **ObjectDetector** (`src/detection/detector.py`)
-  - Wraps RF-DETR or similar detection models
-  - Returns bounding boxes and class labels
-  - Mock mode generates synthetic detections
-
-- **VideoSegmenter** (`src/segmentation/segmenter.py`)
-  - Uses SAM2 for temporal consistent segmentation
-  - Maintains tracking state across frames
-  - Outputs precise masks for each tracked object
-
-### Layer 3: Feature Extraction & Analysis
-- **VisualIdentifier** (`src/clustering/identifier.py`)
-  - Extracts embeddings using SigLIP
-  - Reduces dimensionality with UMAP (optional)
-  - Clusters objects using K-Means
-  - Use case: Team identification, uniform classification
-
-- **SceneTextReader** (`src/ocr/reader.py`)
-  - Uses Vision-Language Model (SmolVLM2)
-  - More robust than traditional OCR for challenging text
-  - Use case: Jersey numbers, license plates, signage
-
-### Layer 4: Spatial Understanding
-- **PerspectiveTransformer** (`src/homography/transformer.py`)
-  - Computes homography matrices
-  - Maps image coordinates to real-world or top-down coordinates
-  - Use case: Court/field mapping, spatial analytics
-
-### Layer 5: Temporal Analysis
-- **EventAnalyzer** (`src/events/analyzer.py`)
-  - State machine for event detection
-  - Tracks object history and trajectories
-  - Detects patterns: dwell time, zone violations, anomalies
-  - Extensible event vocabulary
-
-### Layer 6: Output & Visualization
-- **PipelineVisualizer** (`src/visualization/drawer.py`)
-  - Annotates frames with detections, masks, IDs
-  - Displays cluster assignments and OCR results
-  - Shows detected events with color-coded overlays
-  - Uses Supervision library for professional aesthetics
-
-### Layer 7: Orchestration
-- **demo.py**: Main pipeline coordinator
-  - Initializes all modules
-  - Manages frame-by-frame processing
-  - Handles video I/O
-  - Coordinates data flow between modules
-
-## Data Flow
-
-```
-Video Frame
-    ↓
-[Detection] → Bounding Boxes
-    ↓
-[Segmentation] → Masks + Track IDs
-    ↓
-[Clustering] → Group IDs (e.g., Team A/B)
-    ↓
-[OCR] → Text Labels (e.g., "23")
-    ↓
-[Homography] → Spatial Coordinates
-    ↓
-[Events] → Event List (e.g., "Player 23 entered zone")
-    ↓
-[Visualization] → Annotated Frame
-    ↓
-Output Video
+```mermaid
+graph LR
+    A[Video Source] --> B[ObjectDetector]
+    B --> C[VideoSegmenter]
+    C --> D[VisualIdentifier]
+    D --> E[SceneTextReader]
+    E --> F[PerspectiveTransformer]
+    F --> G[EventAnalyzer]
+    G --> H[PipelineVisualizer]
+    H --> I[Annotated Video]
+    G --> J[JSONL Exporter]
 ```
 
-## Key Design Decisions
+## Main Components
 
-### Why Mock Mode?
-- Allows development and testing without 20GB+ of model weights
-- Enables CI/CD pipelines to run tests quickly
-- Provides a template for custom implementations
+### 1. Orchestration (`src/core/pipeline.py`)
 
-### Why Modular Classes?
-- Each class can be tested independently
-- Easy to swap implementations (e.g., use YOLO instead of RF-DETR)
-- Clear separation allows parallel development
+`VisionPipeline` coordinates all processing stages frame-by-frame:
+- detection
+- tracking/segmentation
+- clustering refresh (configurable interval)
+- OCR refresh (configurable interval)
+- world-coordinate projection
+- temporal event analysis
+- annotated rendering
+- telemetry export
 
-### Why State Machines for Events?
-- Temporal events require memory of past states
-- State machines are intuitive and debuggable
-- Easy to add new event types without modifying core logic
+### 2. Processing Modules
+
+- `src/detection/detector.py`
+  - deterministic mock detections with validation and confidence filtering
+- `src/segmentation/segmenter.py`
+  - IoU-based ID association with missing-frame tolerance
+- `src/clustering/identifier.py`
+  - deterministic embeddings from resized crops and KMeans clustering
+- `src/ocr/reader.py`
+  - mock OCR heuristic with track-level cache
+- `src/homography/transformer.py`
+  - robust homography computation and point transforms
+- `src/events/analyzer.py`
+  - state machine for dwell + zone entry/exit events with cooldown
+- `src/visualization/drawer.py`
+  - modern HUD overlay with readable hierarchy and event feed
+
+### 3. UI Layer (`src/ui/dashboard.py`)
+
+A Streamlit interface provides:
+- video upload
+- pipeline parameter tuning
+- zone definition
+- execution trigger
+- output video preview
+- event table visualization
+
+## Data Contracts
+
+Inter-stage payloads use normalized dictionaries with stable keys:
+
+- Detection:
+  - `bbox`, `label`, `score`, `class_id`
+- Track:
+  - `id`, `bbox`, `mask`, `class_id`, `label`, optional `cluster_id`, `ocr_text`, `world_position`
+- Event:
+  - `frame`, `type`, `object_id`, `details`, `severity`
+
+## Performance and Scalability Considerations
+
+- Intervals (`ocr_interval`, `clustering_interval`) reduce unnecessary heavy calls
+- Track cache and OCR cache reduce recomputation
+- JSONL export is append-only and stream-friendly
+- Mock mode keeps CI and local iteration fast
 
 ## Extension Points
 
-### Adding a New Detection Model
-1. Create a new class in `src/detection/`
-2. Implement `detect(frame)` method returning `[{bbox, label, score}]`
-3. Update `demo.py` to use the new detector
-
-### Adding a New Event Type
-1. Add detection logic to `EventAnalyzer._check_xxx_event()`
-2. Define trigger conditions and thresholds
-3. Append to `self.events` list
-
-### Adding a New Output Format
-1. Extend `PipelineVisualizer` with new drawing functions
-2. Or create a separate exporter (e.g., JSON, protobuf)
-
-## Performance Considerations
-
-### Bottlenecks
-1. **Model Inference**: Detection and segmentation are GPU-bound
-2. **Clustering**: UMAP can be slow with many objects
-3. **Video I/O**: Codec choice affects encoding speed
-
-### Optimizations
-1. **Batch Processing**: Process multiple frames simultaneously
-2. **Async I/O**: Separate video reading/writing threads
-3. **Sparse OCR**: Only run OCR when needed (not every frame)
-4. **Downsample Embeddings**: Use PCA before UMAP for speed
-
-## Dependencies Graph
-
-```
-demo.py
-  ├─ detector (torch, transformers)
-  ├─ segmenter (torch, sam2)
-  ├─ identifier (transformers, sklearn, umap)
-  ├─ reader (transformers)
-  ├─ transformer (opencv)
-  ├─ analyzer (numpy)
-  └─ visualizer (supervision, opencv)
-```
+1. Replace `ObjectDetector` mock with RF-DETR inference
+2. Replace `VideoSegmenter` mock masks with SAM2 masks
+3. Add custom event policies in `EventAnalyzer`
+4. Add dashboard analytics charts from JSONL history
+5. Add distributed processing for multi-camera scenarios
 
 ## Testing Strategy
 
-### Unit Tests
-- Test each module independently with mock data
-- Verify input/output contracts
-- Check edge cases (empty detections, invalid frames)
-
-### Integration Tests
-- Test full pipeline with sample video
-- Verify data flows correctly between modules
-- Check output video quality
-
-### Performance Tests
-- Benchmark FPS on standard hardware
-- Memory profiling to detect leaks
-- GPU utilization monitoring
-
-## Future Enhancements
-
-1. **Multi-Camera Support**: Track objects across camera views
-2. **Real-Time Streaming**: Process live RTSP/RTMP streams
-3. **Cloud Deployment**: Containerize with Docker, deploy to Kubernetes
-4. **Web UI**: Dashboard for configuration and monitoring
-5. **Database Integration**: Store events and trajectories for analytics
+- Unit tests for detector, segmenter, clustering
+- New tests for event analyzer behavior
+- Integration-like tests for pipeline execution and artifacts
